@@ -1,0 +1,95 @@
+# https://github.com/treeverse/lakeFS/blob/master/deployments/compose/docker-compose.yml
+version: '3.7'
+
+services:
+  minio:
+    image: minio/minio:latest
+    command: server --console-address ":9001" /data/
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ACCESS_KEY: minio_access_key
+      MINIO_SECRET_KEY: minio_secret_key
+    volumes:
+      - minio-storage:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  minio-mc:
+    container_name: minio-mc
+    image: minio/mc
+    depends_on:
+      - minio
+    links:
+      - minio
+    volumes:
+      - ./data:/var/data
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc config host rm local;
+      /usr/bin/mc config host add --quiet --api s3v4 local http://minio:9000 minio_access_key minio_secret_key;
+      /usr/bin/mc rb --force local/var;
+      /usr/bin/mc mb --quiet local/var;
+      /usr/bin/mc policy set public local/var;
+      /usr/bin/mc cp -r /var/data local/var;
+      /usr/bin/mc rb --force local/ml-lake;
+      /usr/bin/mc mb --quiet local/ml-lake;
+      /usr/bin/mc policy set public local/ml-lake;
+      exit 0;
+      "
+
+  hive-metastore:
+    hostname: hive-metastore
+    image: 'bitsondatadev/hive-metastore:latest'
+    volumes:
+      - ./conf/metastore-site.xml:/opt/apache-hive-metastore-3.0.0-bin/conf/metastore-site.xml:ro
+    environment:
+      METASTORE_DB_HOSTNAME: mariadb
+    ports:
+      - "9083:9083"
+    depends_on:
+      - mariadb
+    depends_on:
+      - minio
+    links:
+      - mariadb
+      - minio
+
+  mariadb:
+    hostname: mariadb
+    image: mariadb:10.5.8
+    environment:
+      MYSQL_ROOT_PASSWORD: admin
+      MYSQL_USER: admin
+      MYSQL_PASSWORD: admin
+      MYSQL_DATABASE: metastore_db
+
+  trino:
+    image: trinodb/trino:358
+    container_name: trino
+    volumes:
+      - ./conf/ml_lake.properties:/etc/trino/catalog/ml_lake.properties
+    ports:
+      - "8080:8080"
+    links:
+      - hive-metastore
+
+  trino-client:
+    image: trinodb/trino:358
+    profiles: ["client"]
+    entrypoint: ["trino", "--server", "trino:8080", "--catalog", "ml_lake", "--schema", "default"]
+    volumes:
+      - ./sql:/etc/sql
+    depends_on:
+      - trino
+      - hive-metastore
+    links:
+      - trino
+
+volumes:
+ minio-storage:
+  driver: local
