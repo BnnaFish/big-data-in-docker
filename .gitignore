@@ -447,3 +447,5 @@ data/
 .ammonite/
 metals.sbt
 .bsp
+
+metastore_db
