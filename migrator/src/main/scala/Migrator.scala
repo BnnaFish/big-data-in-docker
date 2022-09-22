@@ -33,7 +33,7 @@ object Migrator:
 
     var df = spark.read
       .option("inferSchema", "true")
-      .csv("s3a://etc/data/iris.data")
+      .csv("s3a://var/data/iris.data")
     df = df.toDF("sepal_length", "sepal_width", "petal_length", "petal_width", "class")
     df.printSchema
 
